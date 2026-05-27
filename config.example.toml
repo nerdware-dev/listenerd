@@ -1,0 +1,36 @@
+# Copy to ~/.config/listenerd/config.toml and edit as needed.
+
+[whisper]
+# Whisper model name; the .bin file must live at ~/models/ggml-<model>.bin.
+# Download from https://huggingface.co/ggerganov/whisper.cpp
+#   base             — fast, weak (148 MB)
+#   small            — decent (470 MB)
+#   medium           — good for noisy/quiet speech (1.5 GB)
+#   large-v3-turbo   — best quality/speed tradeoff (1.6 GB, recommended)
+model = "large-v3-turbo"
+# Language code (de, en, …) or "auto" to let whisper detect per segment.
+language = "auto"
+
+[ollama]
+# Any model installed via `ollama pull`. gemma4:latest works well for
+# multilingual (DE + EN) meeting summaries.
+model = "gemma4:latest"
+summary_prompt = "default"
+
+[audio]
+mic_device = "default"            # macOS default input (typically your headset/AirPods)
+system_device = "BlackHole 2ch"   # virtual loopback for capturing system audio
+sample_rate = 16000               # whisper expects 16 kHz
+
+[session]
+# Auto-watch mode only: how long to wait after mic-off before finalizing.
+cooldown_seconds = 10
+# Auto-watch mode only: discard sessions shorter than this (filters accidental
+# triggers). The manual `record` command ignores this.
+min_duration_seconds = 30
+
+[output]
+meetings_dir = "~/Meetings"
+# false: delete WAVs after writing the .md (saves disk).
+# true:  keep WAVs in <meetings_dir>/.sessions/ (useful for debugging / reprocessing).
+keep_audio = false

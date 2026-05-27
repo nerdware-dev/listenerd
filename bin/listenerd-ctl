@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Start/stop/status helper for `listenerd record`. Used by the SwiftBar plugin
+# and from the shell.
+set -u
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+UV="${UV:-/opt/homebrew/bin/uv}"
+LOGFILE="${LISTENERD_LOG:-$HOME/Library/Logs/listenerd-record.log}"
+PROC_PATTERN='\.venv/bin/listenerd record'
+
+is_running() {
+  pgrep -f "$PROC_PATTERN" >/dev/null 2>&1
+}
+
+start() {
+  if is_running; then
+    echo "already running"
+    return 0
+  fi
+  # Launch via a headless .app bundle. macOS treats the bundle as its own
+  # TCC identity (Mic permission requested via Info.plist), so the recorder
+  # runs hidden — no Terminal window, no dock icon. First launch shows a
+  # one-time Mic-permission prompt for "listenerd".
+  # `-g` keeps the calling app (SwiftBar) frontmost; the bundle is LSUIElement
+  # so it never shows a window or dock icon either way.
+  /usr/bin/open -g -a "$REPO/extras/listenerd-recorder.app"
+  echo "started"
+}
+
+stop() {
+  if ! is_running; then
+    echo "not running"
+    return 0
+  fi
+  pkill -TERM -f "$PROC_PATTERN" || true
+  # Wait briefly so post-processing has a chance to start; don't block forever.
+  for _ in 1 2 3 4 5; do
+    is_running || break
+    sleep 1
+  done
+  echo "stopping (post-processing runs in background; see log)"
+}
+
+case "${1:-status}" in
+  start)  start ;;
+  stop)   stop ;;
+  toggle) if is_running; then stop; else start; fi ;;
+  status) if is_running; then echo recording; else echo idle; fi ;;
+  log)    exec tail -f "$LOGFILE" ;;
+  *) echo "usage: $0 {start|stop|toggle|status|log}" >&2; exit 2 ;;
+esac

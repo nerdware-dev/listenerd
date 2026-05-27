@@ -1,0 +1,16 @@
+#!/bin/bash
+# Entry point of listenerd-recorder.app. macOS launches this as the bundle's
+# executable, so TCC resolves Mic permission against the .app bundle itself —
+# headless (LSUIElement=true), no Terminal window required.
+set -u
+
+# Resolve the repo root from this script's location:
+# <repo>/extras/listenerd-recorder.app/Contents/MacOS/listenerd-recorder
+REPO="$(cd "$(dirname "$0")/../../../.." && pwd)"
+UV="${UV:-/opt/homebrew/bin/uv}"
+LOG="${LISTENERD_LOG:-$HOME/Library/Logs/listenerd-record.log}"
+
+mkdir -p "$(dirname "$LOG")"
+echo "=== $(date '+%Y-%m-%d %H:%M:%S') launch via .app ===" >> "$LOG"
+cd "$REPO"
+exec "$UV" run listenerd record -v >> "$LOG" 2>&1
