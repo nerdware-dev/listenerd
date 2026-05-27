@@ -117,7 +117,14 @@ def record_once(cfg: Config) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        signal.signal(signal.SIGTERM, prev_term)
+        # Once we're shutting down, ignore further SIGINT/SIGTERM. A second
+        # signal during post-processing (e.g. SwiftBar refreshes "recording"
+        # for ~3s after Stop and a frustrated user clicks Stop again) would
+        # otherwise kill the python process mid-transcription, leaving the
+        # session unfinished. The signals do still terminate whisper-cli
+        # subprocesses via the process group, so we don't get stuck.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         recorder.stop()
         duration_s = int(time.monotonic() - start_mono)
         log.info("Stopped after %ds. Processing…", duration_s)
@@ -125,6 +132,7 @@ def record_once(cfg: Config) -> None:
             session_dir, session_started_at, duration_s, cfg,
             enforce_min_duration=False,
         )
+        signal.signal(signal.SIGTERM, prev_term)
 
 
 def daemon_loop(cfg: Config) -> None:

@@ -15,9 +15,26 @@ _NOISE_TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Canonical hallucinations whisper-cpp produces on silent audio (e.g. when
+# the system track captures nothing because Multi-Output Device isn't set
+# up). Conservative list: only filter when the text matches one of these
+# *exactly* — to avoid swallowing real "Thank you" lines in actual speech.
+_HALLUCINATION_TEXTS = frozenset({
+    "Thank you.",
+    "Thanks for watching.",
+    "Thank you for watching.",
+    "Thanks for watching!",
+    ".",
+})
+
 
 def _is_noise(text: str) -> bool:
-    return bool(_NOISE_TOKEN_RE.match(text))
+    text = text.strip()
+    if _NOISE_TOKEN_RE.match(text):
+        return True
+    if text in _HALLUCINATION_TEXTS:
+        return True
+    return False
 
 
 @dataclass(frozen=True)
