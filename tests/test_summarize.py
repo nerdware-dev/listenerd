@@ -1,4 +1,4 @@
-import subprocess
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +10,21 @@ from listenerd.summarize import (
     parse_ollama_response,
     summarize,
 )
+
+
+def _fake_urlopen(response_text: str, *, status: int = 200, raise_url_error: bool = False):
+    """Return a fake urlopen callable that yields the given Ollama response."""
+    def _impl(req, timeout=None):
+        if raise_url_error:
+            import urllib.error
+            raise urllib.error.URLError("connection refused")
+        body = json.dumps({"response": response_text, "model": "test"}).encode()
+        class _Resp:
+            def __enter__(self_): return self_
+            def __exit__(self_, *_): pass
+            def read(self_): return body
+        return _Resp()
+    return _impl
 
 
 def test_format_transcript_groups_speaker_and_text():
@@ -53,37 +68,36 @@ ACTION_ITEMS:
 
 def test_summarize_invokes_ollama_with_model(monkeypatch):
     segments = [TaggedSegment(0, 1000, "Hello", "Me")]
-
     captured = {}
 
-    def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["input"] = kwargs.get("input")
-        return subprocess.CompletedProcess(
-            cmd,
-            0,
-            stdout="SUMMARY:\nTest.\n\nACTION_ITEMS:\n(none)\n",
-            stderr="",
-        )
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["body"] = json.loads(req.data.decode())
+        body = json.dumps({"response": "SUMMARY:\nTest.\n\nACTION_ITEMS:\n(none)\n"}).encode()
+        class _Resp:
+            def __enter__(self_): return self_
+            def __exit__(self_, *_): pass
+            def read(self_): return body
+        return _Resp()
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
     result = summarize(segments, model="llama3.1:8b")
 
-    assert captured["cmd"] == ["ollama", "run", "llama3.1:8b"]
-    assert "Me: Hello" in captured["input"]
+    assert captured["url"].endswith("/api/generate")
+    assert captured["body"]["model"] == "llama3.1:8b"
+    assert "Me: Hello" in captured["body"]["prompt"]
+    assert captured["body"]["stream"] is False
     assert result.summary.strip() == "Test."
     assert result.action_items == []
 
 
 def test_summarize_returns_none_summary_on_ollama_failure(monkeypatch):
     segments = [TaggedSegment(0, 1000, "Hello", "Me")]
-
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="connection refused")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_urlopen("", raise_url_error=True),
+    )
     result = summarize(segments, model="llama3.1:8b")
     assert result.summary is None
     assert result.action_items == []

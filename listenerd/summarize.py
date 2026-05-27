@@ -1,12 +1,23 @@
 """Generate summary + action items via local Ollama."""
 from __future__ import annotations
 
+import json
+import os
 import re
-import subprocess
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional
 
 from listenerd.merge import TaggedSegment
+
+# The local Ollama HTTP API. We use this instead of the `ollama run` CLI
+# because the CLI wraps output at the terminal width and overwrites with
+# ANSI cursor codes — the wrapping injects line breaks mid-word that
+# survive even after stripping the escape codes ("Mod\nModell"). The HTTP
+# API returns clean, unwrapped text.
+OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+OLLAMA_GENERATE_TIMEOUT_S = 300
 
 
 PROMPT_TEMPLATE = """\
@@ -87,21 +98,37 @@ def parse_ollama_response(response: str) -> SummaryResult:
     )
 
 
+def _call_ollama(model: str, prompt: str) -> tuple[str | None, str | None]:
+    """POST to /api/generate. Returns (response_text, error)."""
+    payload = json.dumps({
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{OLLAMA_URL}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=OLLAMA_GENERATE_TIMEOUT_S) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.URLError as e:
+        return None, f"ollama HTTP error: {e}"
+    except (OSError, json.JSONDecodeError) as e:
+        return None, f"ollama response error: {e}"
+
+    text = data.get("response")
+    if not isinstance(text, str):
+        return None, "ollama returned no 'response' field"
+    return text, None
+
+
 def summarize(segments: list[TaggedSegment], *, model: str) -> SummaryResult:
     prompt = PROMPT_TEMPLATE.format(transcript=format_transcript_for_prompt(segments))
+    response, err = _call_ollama(model, prompt)
+    if err is not None:
+        return SummaryResult(summary=None, action_items=[], error=err)
 
-    result = subprocess.run(
-        ["ollama", "run", model],
-        input=prompt,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return SummaryResult(
-            summary=None,
-            action_items=[],
-            error=result.stderr.strip() or "ollama exited non-zero",
-        )
-
-    parsed = parse_ollama_response(_strip_ansi(result.stdout))
-    return parsed
+    return parse_ollama_response(_strip_ansi(response))
