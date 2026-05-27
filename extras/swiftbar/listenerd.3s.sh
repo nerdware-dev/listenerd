@@ -10,8 +10,6 @@
 # <swiftbar.author>Lukas Hartrumpf</swiftbar.author>
 # <swiftbar.desc>Manual start/stop for the listenerd recorder.</swiftbar.desc>
 
-# Resolve the repo root via the symlink target so this script works regardless
-# of where SwiftBar's plugin dir is configured.
 SELF="$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$0")"
 REPO="$(cd "$(dirname "$SELF")/../.." && pwd)"
 CTL="$REPO/bin/listenerd-ctl"
@@ -20,15 +18,26 @@ LOGFILE="$HOME/Library/Logs/listenerd-record.log"
 
 state="$("$CTL" status 2>/dev/null || echo unknown)"
 
-if [[ "$state" == "recording" ]]; then
-  echo "🔴 REC | color=red"
-  echo "---"
-  echo "Stop Recording | bash='$CTL' param1=stop terminal=false refresh=true"
-else
-  echo "⚪︎"
-  echo "---"
-  echo "Start Recording | bash='$CTL' param1=start terminal=false refresh=true"
-fi
+case "$state" in
+  recording)
+    echo "🔴 REC | color=red"
+    echo "---"
+    echo "Stop Recording | bash='$CTL' param1=stop terminal=false refresh=true"
+    ;;
+  processing)
+    # Transcribing + summarizing. Don't offer Stop — signals are ignored
+    # during this phase anyway, and clicking again is what got people in
+    # trouble before.
+    echo "⏳ processing… | color=orange"
+    echo "---"
+    echo "Processing transcript + summary (no input) | disabled=true"
+    ;;
+  *)
+    echo "⚪︎"
+    echo "---"
+    echo "Start Recording | bash='$CTL' param1=start terminal=false refresh=true"
+    ;;
+esac
 
 echo "---"
 echo "Open Meetings folder | bash=/usr/bin/open param1='$MEETINGS' terminal=false"

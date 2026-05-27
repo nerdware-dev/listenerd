@@ -6,10 +6,29 @@ set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 UV="${UV:-/opt/homebrew/bin/uv}"
 LOGFILE="${LISTENERD_LOG:-$HOME/Library/Logs/listenerd-record.log}"
+STATE_FILE="${LISTENERD_STATE:-/tmp/listenerd.state}"
 PROC_PATTERN='\.venv/bin/listenerd record'
 
 is_running() {
   pgrep -f "$PROC_PATTERN" >/dev/null 2>&1
+}
+
+# Returns idle | recording | processing.
+# The state file is written by record_once. We still gate on is_running so
+# a stale state file (e.g. left over after a crash) doesn't lie.
+current_state() {
+  if ! is_running; then
+    # Clean up stale state if the process is gone.
+    [[ -f "$STATE_FILE" ]] && rm -f "$STATE_FILE"
+    echo idle
+    return
+  fi
+  if [[ -f "$STATE_FILE" ]]; then
+    cat "$STATE_FILE"
+  else
+    # Process is up but hasn't written state yet — early startup window.
+    echo recording
+  fi
 }
 
 start() {
@@ -45,7 +64,7 @@ case "${1:-status}" in
   start)  start ;;
   stop)   stop ;;
   toggle) if is_running; then stop; else start; fi ;;
-  status) if is_running; then echo recording; else echo idle; fi ;;
+  status) current_state ;;
   log)    exec tail -f "$LOGFILE" ;;
   *) echo "usage: $0 {start|stop|toggle|status|log}" >&2; exit 2 ;;
 esac

@@ -23,6 +23,28 @@ from listenerd.writer import MeetingDoc, render_markdown
 log = logging.getLogger("listenerd")
 
 
+# Lifecycle state file read by listenerd-ctl (and from there the SwiftBar
+# plugin). Contains one line: "recording" or "processing". Removed when the
+# session is fully done. /tmp is fine — the file is purely session-local.
+STATE_FILE = Path("/tmp/listenerd.state")
+
+
+def _write_state(value: str) -> None:
+    try:
+        STATE_FILE.write_text(value)
+    except OSError as e:
+        log.debug("could not write state file: %s", e)
+
+
+def _clear_state() -> None:
+    try:
+        STATE_FILE.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        log.debug("could not remove state file: %s", e)
+
+
 def process_session(
     session_dir: Path,
     started_at: datetime,
@@ -103,6 +125,7 @@ def record_once(cfg: Config) -> None:
         shutil.rmtree(session_dir, ignore_errors=True)
         raise
 
+    _write_state("recording")
     log.info("Recording session %s. Press Ctrl-C (or send SIGTERM) to stop.",
              session_dir.name)
     start_mono = time.monotonic()
@@ -128,10 +151,14 @@ def record_once(cfg: Config) -> None:
         recorder.stop()
         duration_s = int(time.monotonic() - start_mono)
         log.info("Stopped after %ds. Processing…", duration_s)
-        process_session(
-            session_dir, session_started_at, duration_s, cfg,
-            enforce_min_duration=False,
-        )
+        _write_state("processing")
+        try:
+            process_session(
+                session_dir, session_started_at, duration_s, cfg,
+                enforce_min_duration=False,
+            )
+        finally:
+            _clear_state()
         signal.signal(signal.SIGTERM, prev_term)
 
 
